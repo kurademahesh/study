@@ -1,0 +1,164 @@
+#include <stdio.h>
+#include <string.h>
+#include "cJSON.h"
+struct Response getActualAccountNumber(const char * const accNumber);
+struct Response parseMessage(const char * const json);
+struct Response getStructure();
+
+struct Response {
+   char ddaAccountNumber[14];
+   int statusFound;
+   int processStatus;
+   int isError;
+}; 
+
+/******************************************************************************
+	main function
+******************************************************************************/
+int main(int argc, char **argv)
+{
+	//printf("Calling for account = %s\n" , argv[1]);
+	//int result = getActualAccountNumber(argv[1]);
+	//printf("Received details = %d\n" , result);
+	struct Response response;
+	response = getStructure();
+	printf(" Status %d and %d  and %s \n", response.statusFound, response.processStatus, response.ddaAccountNumber);
+	
+}
+
+struct Response getStructure(){
+	struct Response res;
+	strcpy(res.ddaAccountNumber, "something");
+	res.statusFound= 1;
+	res.processStatus= 1;
+	res.isError =0;
+	return res;
+}
+
+struct Response getActualAccountNumber(const char * const accNumber){
+	FILE *fp;
+	char url[100];
+	char result[1024];
+	strcpy(url, "wget -qO- ");
+	strcat(url, "lxisap0510.dev.isap.asia.cib:8080/account/");
+	strcat(url, accNumber);
+	
+	printf("Calling URL : %s\n", url);
+
+	/* Open the command for reading. */	
+	fp = popen(url, "r");
+	if (fp == NULL) {
+		printf("Failed to run command\n" );
+		struct Response response;
+		response.isError = 1;
+		return response; 
+	}
+	/* Read the output a line at a time - output it. */
+	while (fgets(result, sizeof(result)-1, fp) != NULL);
+    /* close */
+	pclose(fp);
+	fprintf(stderr, "Received Response is = %s\n", result);
+	struct Response response = parseMessage(result);
+	return response;
+}
+
+struct Response parseMessage(const char * const json)
+{
+    const cJSON *coccBrch = NULL;
+    const cJSON *coccRadi = NULL;
+    const cJSON *coccCurr = NULL;
+    const cJSON *coccToac = NULL;
+    const cJSON *coccSeqn = NULL;
+    const cJSON *virtualAccountFlag = NULL;
+    const cJSON *virtualAccountStatus = NULL;
+	
+	struct Response response;
+	response.statusFound = 0;
+	response.processStatus = 0;
+	response.isError = 0;
+	
+	char ddaAccountNumber[14];
+	
+    cJSON *response_json = cJSON_Parse(json);
+    if (response_json == NULL)
+    {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL)
+        {
+            fprintf(stderr, "Error parsing json: %s\n", error_ptr);
+        }
+        cJSON_Delete(response_json);
+		response.isError = 1;
+		return response;
+    }
+	
+	virtualAccountFlag = cJSON_GetObjectItemCaseSensitive(response_json, "virtualAccountFlag");
+    if (cJSON_IsString(virtualAccountFlag) && (virtualAccountFlag->valuestring != NULL)){
+        printf("virtualAccountFlag : \"%s\"\n", virtualAccountFlag->valuestring);
+		
+		if(strcmp(virtualAccountFlag->valuestring, "0") == 0 ){
+			cJSON_Delete(response_json);
+			return response;
+		}
+	
+		response.statusFound = 1;
+		printf("virtual Account Flag found\n");
+			
+		virtualAccountStatus = cJSON_GetObjectItemCaseSensitive(response_json, "virtualAccountStatus");
+		if (cJSON_IsString(virtualAccountStatus) && (virtualAccountStatus->valuestring != NULL)){
+			printf("virtualAccountStatus : \"%s\"\n", virtualAccountStatus->valuestring);
+			if((strcmp(virtualAccountStatus->valuestring, "Active") == 0 ) || 
+			    strcmp(virtualAccountStatus->valuestring, "To be deactivated") == 0 ){
+				
+				response.statusFound = 1;
+					
+				printf("virtual Account Status Active\n");
+				
+				coccBrch = cJSON_GetObjectItemCaseSensitive(response_json, "coccBrch");
+				if (cJSON_IsString(coccBrch) && (coccBrch->valuestring != NULL)){
+					printf("coccBrch : \"%s\"\n", coccBrch->valuestring);
+					if((strlen(coccBrch->valuestring) == 1)){
+						strcpy(ddaAccountNumber, "0");
+ 						strcat(ddaAccountNumber, coccBrch->valuestring);
+					}
+					else{
+						strcpy(ddaAccountNumber, coccBrch->valuestring);
+					}
+				}
+				
+				coccRadi = cJSON_GetObjectItemCaseSensitive(response_json, "coccRadi");
+				if (cJSON_IsString(coccRadi) && (coccRadi->valuestring != NULL)){
+					strcat(ddaAccountNumber, coccRadi->valuestring);
+					printf("coccRadi : \"%s\"\n", coccRadi->valuestring);
+				}
+				coccToac = cJSON_GetObjectItemCaseSensitive(response_json, "coccToac");
+				if (cJSON_IsString(coccToac) && (coccToac->valuestring != NULL)){
+					strcat(ddaAccountNumber, coccToac->valuestring);
+					printf("coccToac : \"%s\"\n", coccToac->valuestring);
+				}
+				coccCurr = cJSON_GetObjectItemCaseSensitive(response_json, "coccCurr");
+				if (cJSON_IsString(coccCurr) && (coccCurr->valuestring != NULL)){
+					strcat(ddaAccountNumber, coccCurr->valuestring);
+					printf("coccCurr : \"%s\"\n", coccCurr->valuestring);
+				}
+				coccSeqn = cJSON_GetObjectItemCaseSensitive(response_json, "coccSeqn");
+				if (cJSON_IsString(coccSeqn) && (coccSeqn->valuestring != NULL)){
+					strcat(ddaAccountNumber, coccSeqn->valuestring);
+					printf("coccSeqn : \"%s\"\n", coccSeqn->valuestring);
+				}
+				
+				cJSON_Delete(response_json);
+				printf("DDA Account :%s\n", ddaAccountNumber); 
+				
+			}
+			else{
+				//account deactivated add entry into prrt and do not process further
+			}
+		}
+    }
+	
+	cJSON_Delete(response_json);
+	return 1;
+	
+}
+
